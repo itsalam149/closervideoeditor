@@ -1,8 +1,20 @@
-import React from 'react';
-import { Upload, Maximize2, Pause, Play, Square, MousePointer, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
+import React, { useRef, useEffect } from "react";
+import {
+  Upload,
+  Maximize2,
+  Pause,
+  Play,
+  Square,
+  MousePointer,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+} from "lucide-react";
 
 interface VideoPanelProps {
   videoFile: string | null;
+  subtitleFile: File | null;
   showPreview: boolean;
   setShowPreview: (show: boolean) => void;
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -12,6 +24,8 @@ interface VideoPanelProps {
   selectedSubtitle: any;
   setSelectedSubtitle: (subtitle: any) => void;
   isPlaying: boolean;
+  setIsPlaying: (isPlaying: boolean) => void;
+  setCurrentTime: (time: number) => void;
   togglePlayPause: () => void;
   handleSeek: (e: React.MouseEvent<HTMLDivElement>) => void;
   currentTime: number;
@@ -22,6 +36,7 @@ interface VideoPanelProps {
 
 const VideoPanel: React.FC<VideoPanelProps> = ({
   videoFile,
+  subtitleFile,
   showPreview,
   setShowPreview,
   videoRef,
@@ -31,6 +46,8 @@ const VideoPanel: React.FC<VideoPanelProps> = ({
   selectedSubtitle,
   setSelectedSubtitle,
   isPlaying,
+  setIsPlaying,
+  setCurrentTime,
   togglePlayPause,
   handleSeek,
   currentTime,
@@ -38,6 +55,42 @@ const VideoPanel: React.FC<VideoPanelProps> = ({
   formatTime,
   moveSubtitle,
 }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !videoRef.current || !subtitleFile) return;
+
+    const setup = async () => {
+      const { initLibass, loadSubtitles, renderFrame } = await import(
+        "../../utils/libassRenderer"
+      );
+
+      const assRenderer = await initLibass(canvasRef.current);
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const content = e.target?.result as string;
+        await loadSubtitles(content);
+      };
+      reader.readAsText(subtitleFile);
+
+      const renderLoop = () => {
+        if (videoRef.current && !videoRef.current.paused) {
+          renderFrame(videoRef.current.currentTime);
+          requestAnimationFrame(renderLoop);
+        }
+      };
+
+      videoRef.current.addEventListener("play", renderLoop);
+
+      return () => {
+        videoRef.current?.removeEventListener("play", renderLoop);
+      };
+    };
+
+    setup();
+  }, [subtitleFile]);
+
   return (
     <div className="xl:col-span-6">
       <div className="bg-black/20 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
@@ -54,9 +107,9 @@ const VideoPanel: React.FC<VideoPanelProps> = ({
           </button>
         </div>
 
-        {/* Video Container */}
+        {/* Video + Canvas Overlay */}
         <div
-          className="relative bg-black rounded-xl overflow-hidden mb-4"
+          className="relative w-full h-full mb-4"
           style={{ aspectRatio: "16/9" }}
         >
           {videoFile ? (
@@ -64,48 +117,18 @@ const VideoPanel: React.FC<VideoPanelProps> = ({
               <video
                 ref={videoRef}
                 src={videoFile}
-                className="w-full h-full object-contain"
+                className="absolute top-0 left-0 w-full h-full"
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
+                controls
               />
-
-              {/* Subtitle Overlay */}
-              {showPreview && (
-                <div className="absolute inset-0 pointer-events-none">
-                  {getCurrentSubtitles().map((subtitle) => (
-                    <div
-                      key={subtitle.id}
-                      className={`absolute transform -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-move ${
-                        selectedSubtitle?.id === subtitle.id
-                          ? "ring-2 ring-cyan-400"
-                          : ""
-                      }`}
-                      style={{
-                        left: `${subtitle.x}%`,
-                        top: `${subtitle.y}%`,
-                        fontSize: `${subtitle.fontSize}px`,
-                        color: subtitle.color,
-                        fontFamily: subtitle.fontFamily,
-                        backgroundColor: subtitle.backgroundColor,
-                        padding: "4px 8px",
-                        borderRadius: "4px",
-                        whiteSpace: "pre-line",
-                        textAlign: "center",
-                        maxWidth: "80%",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedSubtitle(subtitle);
-                      }}
-                    >
-                      {subtitle.text}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <canvas
+                ref={canvasRef}
+                className="absolute top-0 left-0 w-full h-full pointer-events-none"
+              />
             </>
           ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">
+            <div className="flex items-center justify-center h-full text-gray-400 bg-black">
               <div className="text-center">
                 <Upload size={48} className="mx-auto mb-4 opacity-50" />
                 <p>Upload a video to start editing</p>
